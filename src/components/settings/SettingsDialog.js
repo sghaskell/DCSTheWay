@@ -16,6 +16,7 @@ import ButtonDelaySetting from "./ButtonDelaySetting";
 import CrosshairSetting from "./CrosshairSetting";
 import KeybindSetting from "./KeybindSetting/KeybindSetting";
 import VrFeedbackSetting from "./VrFeedbackSetting";
+import DcsSetupSetting from "./DcsSetupSetting";
 
 const SettingsDialog = ({ open, closeHandler }) => {
   const dispatch = useDispatch();
@@ -59,6 +60,10 @@ const SettingsDialog = ({ open, closeHandler }) => {
           <Divider />
           <ListItem sx={{ px: 0, pt: 2 }}>
             <ButtonDelaySetting settingChangeHandler={settingChangeHandler} />
+          </ListItem>
+          <Divider />
+          <ListItem sx={{ px: 0, pt: 2 }}>
+            <DcsSetupSetting />
           </ListItem>
         </List>
       </DialogContent>

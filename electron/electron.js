@@ -24,6 +24,7 @@ const FileHandler = require("./fileHandler");
 const setupKeybinds = require("./keybindListener");
 const JoystickListener = require("./joystickListener");
 const Speaker = require("./speech");
+const DcsInstaller = require("./dcsInstaller");
 
 
 let mainWindow;
@@ -528,6 +529,7 @@ if (!isTheOnlyInstance) {
     udpSender = new UDPSender();
     joystickListener = new JoystickListener(() => mainWindow);
     speaker = new Speaker();
+    new DcsInstaller();
     userPreferenceHandler = new UserPreferenceHandler(
       mainWindow,
       applyElectronPreferences,

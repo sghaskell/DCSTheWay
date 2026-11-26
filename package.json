@@ -74,6 +74,18 @@
       "build/**/*",
       "electron"
     ],
+    "extraResources": [
+      {
+        "from": "dcsFiles",
+        "to": "dcsFiles",
+        "filter": [
+          "TheWay.lua",
+          "TheWayStatus.dlg",
+          "Crosshair.dlg",
+          "Crosshair.png"
+        ]
+      }
+    ],
     "win": {
       "icon": "build/TheWayIcon.ico"
     }

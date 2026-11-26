@@ -35,22 +35,31 @@ Multiplayer is supported as long as the server has Player Exports turned on (mos
 
 ## How to install?
 1. Download the latest zip file from the Releases section [found here](https://github.com/jonsky752/DCSTheWay/releases), and extract it. 
-2. Copy the folder `TheWay` into `Users/[yourname]/Saved Games/DCS/Scripts`
-   (The `DCS` folder name may be `DCS.openbeta` if you are on the openbeta version of the game).
-3. Edit the `Export.lua` file inside the `Scripts` folder and append this line at the end of the file, and save it:
+2. Run the installer. TheWay launches when it's done, and you can go fly! You can find a shortcut to TheWay on your desktop.
+THE WAY WILL NOT CONNECT TO DCS UNTIL YOU ARE IN THE COCKPIT OF YOUR CHOSEN MODULE
+
+You don't need to copy any files into DCS. Every time it starts, TheWay sets itself up in each
+DCS install it finds in Saved Games (`DCS`, `DCS.openbeta`, ...):
+* it copies its scripts into `Saved Games/DCS/Scripts/TheWay`, replacing them when they're out of date
+* it adds its line to `Scripts/Export.lua` (or creates the file) if the line isn't there yet. Other
+  tools' lines (SRS, Tacview, DCS-BIOS, ...) are left alone, and the previous version is saved as
+  `Export.lua.theway-backup`.
+
+Settings → DCS setup shows the result per DCS install, and has Repair and Remove buttons.
+If you have commented out TheWay's line in `Export.lua`, TheWay leaves it that way. Changes take
+effect from the next mission you load. If DCS has never been started, start it once and reopen TheWay.
+
+To update, run the newer installer. The DCS files are updated the next time TheWay starts.
+
+<details><summary>Manual setup (only if you turned off "Keep DCS files up to date")</summary>
+
+1. Copy `TheWay.lua`, `TheWayStatus.dlg`, `Crosshair.dlg` and `Crosshair.png` from `dcsFiles` into
+   `Saved Games/DCS/Scripts/TheWay` (the folder may be `DCS.openbeta` on the openbeta version).
+2. Append this line to `Saved Games/DCS/Scripts/Export.lua` (create the file if it doesn't exist):
   ```lua
   pcall(function() local TheWayLfs=require('lfs');dofile(TheWayLfs.writedir()..'Scripts/TheWay/TheWay.lua'); end)
   ```
-   If there is no `Export.lua` file already existing there, create it yourself, and it should include only the line above.
-
-4. In the end, the folder structure should look like this:
- <img width="598" alt="folderStructure" src="https://github.com/aronCiucu/DCSTheWay/assets/45103765/567f33de-e6e5-4568-8026-30c3f39f62f7">
-   
-5. Run the installer from the zip file you've previously extracted.
-6. After installation, the program will launch, and you can go fly! You can find a shortcut to TheWay on your desktop.
-THE WAY WILL NOT CONNECT TO DCS UNTIL YOU ARE IN THE COCKPIT OF YOUR CHOSEN MODULE
-
-If you are updating from an older version, simply download the newest release, rerun the installer and replace your existing `TheWay` folder in Saved Games with the new one.
+</details>
 
 ## How to use? 
 Video tutorial here:
@@ -70,13 +79,12 @@ While you fly, TheWay gives you feedback inside the headset:
 * seat/option questions shown inside DCS as `[1] ... [2] ...`; answer them with your Option 1-4 bindings
 * short sound cues through your default audio device
 
-Both can be switched off in Settings → VR feedback. The status line needs
-`TheWayStatus.dlg` in your `Saved Games/DCS/Scripts/TheWay` folder next to `TheWay.lua`.
+Both can be switched off in Settings → VR feedback.
 
 You can still use the DCS 2D mirror on your desktop to interact with TheWay and DCS.
 ### I do not anything other than "Enter cockpit to start" error!
 THE WAY WILL NOT CONNECT TO DCS UNTIL YOU ARE IN THE COCKPIT OF YOUR CHOSEN MODULE.
-Make sure you have followed the installation instructions to the letter, and that every file is where it should be.
+Open Settings → DCS setup and check that your DCS install shows "installed". If it doesn't, press Repair.
 Check if the server you are flying on has Player Exports turned on. If it doesn't, this won't work! 
 ### Where is the app installed by default?
 TheWay files are installed in Windows at `C:\Users\USER\AppData\Local\Programs\theway`
