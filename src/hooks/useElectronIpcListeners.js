@@ -4,6 +4,7 @@ import { waypointsActions } from "../store/waypoints";
 import { uiActions } from "../store/ui";
 import { useDispatch, useSelector } from "react-redux";
 import { throttle } from "lodash";
+import { notify } from "../utils/vrFeedback";
 
 
 const { ipcRenderer } = window.require("electron");
@@ -25,6 +26,9 @@ const useElectronIpcListeners = () => {
             elev,
           }),
         );
+        notify("save", `TheWay: WP ${dcsWaypointsCount + 1} saved`, 2000, `Waypoint ${dcsWaypointsCount + 1} saved.`);
+      } else {
+        notify("error", "TheWay: no position - are you in a cockpit?", 3000, "No position. Are you in a cockpit?");
       }
     };
 
@@ -67,10 +71,22 @@ const useElectronIpcListeners = () => {
 
     const onDeleteWaypoints = () => {
       dispatch(waypointsActions.deleteAll());
+      notify("deleteAll", "TheWay: all waypoints deleted", 2500, "All waypoints deleted.");
     };
 
     const onDeleteLastWaypoint = () => {
       dispatch(waypointsActions.deleteLast());
+      const left = Math.max(0, dcsWaypointsCount - 1);
+      notify(
+        "deleteLast",
+        dcsWaypointsCount > 0
+          ? `TheWay: WP ${dcsWaypointsCount} deleted (${left} left)`
+          : "TheWay: no waypoints to delete",
+        2000,
+        dcsWaypointsCount > 0
+          ? `Waypoint ${dcsWaypointsCount} deleted.`
+          : "No waypoints to delete.",
+      );
     };
 
     const onPreferencesReceived = (_e, preferences) => {

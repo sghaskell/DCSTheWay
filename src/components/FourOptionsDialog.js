@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { uiActions } from "../store/ui";
 import { saveModulePreferences } from "../utils/savePreferences";
+import { showDcsPrompt } from "../utils/vrFeedback";
 
 const { ipcRenderer } = window.require("electron");
 
@@ -76,6 +77,12 @@ const FourDialog = ({
       ipcRenderer.removeListener("optionDialogSelect", handler);
     };
   }, [isOpen, op1, op2, op3, op4]); // (keep it simple: rebind if options change)
+
+  // Mirror this prompt into DCS (visible in VR) while it is open
+  useEffect(() => {
+    if (!isOpen) return;
+    return showDcsPrompt(title, [op1, op2, op3, op4]);
+  }, [isOpen, title, op1, op2, op3, op4]);
 
   return (
     <Dialog open={isOpen} onClose={onReject}>
@@ -149,6 +156,12 @@ const FourSimpleDialog = ({
       ipcRenderer.removeListener("optionDialogSelect", handler);
     };
   }, [isOpen, op1, op2, op3, op4]);
+
+  // Mirror this prompt into DCS (visible in VR) while it is open
+  useEffect(() => {
+    if (!isOpen) return;
+    return showDcsPrompt(title, [op1, op2, op3, op4]);
+  }, [isOpen, title, op1, op2, op3, op4]);
 
   return (
     <Dialog open={isOpen} onClose={onReject}>

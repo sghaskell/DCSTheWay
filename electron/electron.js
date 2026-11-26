@@ -22,6 +22,8 @@ const {
 const CrosshairWindow = require("./CrosshairWindow");
 const FileHandler = require("./fileHandler");
 const setupKeybinds = require("./keybindListener");
+const JoystickListener = require("./joystickListener");
+const Speaker = require("./speech");
 
 
 let mainWindow;
@@ -31,6 +33,8 @@ let udpListener;
 let fileHandler;
 let udpSender;
 let userPreferenceHandler;
+let joystickListener;
+let speaker;
 
 let restoreWindow;
 let pillWindow;
@@ -50,6 +54,39 @@ function buildAppUrl(windowName) {
   return isDev
     ? `http://localhost:3000${suffix}`
     : `file://${path.join(__dirname, "../build/index.html")}${suffix}`;
+}
+
+// Load the React UI into a window. In dev mode Electron usually starts before
+// the React dev server is listening, so keep retrying until it answers instead
+// of leaving the window on a connection-refused error page.
+function loadAppUrl(win, windowName) {
+  const url = buildAppUrl(windowName);
+  if (!isDev) {
+    win.loadURL(url);
+    return;
+  }
+
+  const RETRY_MS = 1000;
+  const MAX_ATTEMPTS = 120;
+  let attempts = 0;
+
+  const tryLoad = () => {
+    if (win.isDestroyed()) return;
+    attempts++;
+    win.loadURL(url).catch(() => {
+      if (win.isDestroyed()) return;
+      if (attempts >= MAX_ATTEMPTS) {
+        console.log(`[TheWay] gave up waiting for the dev server at ${url}`);
+        return;
+      }
+      if (attempts === 1) {
+        console.log(`[TheWay] waiting for the dev server at ${url} ...`);
+      }
+      setTimeout(tryLoad, RETRY_MS);
+    });
+  };
+
+  tryLoad();
 }
 
 function getPrimaryWorkArea() {
@@ -289,7 +326,7 @@ async function createWindow() {
     } catch {}
   }
 
-  mainWindow.loadURL(buildAppUrl(null));
+  loadAppUrl(mainWindow, null);
 
 if (isDev) {
   const options = { loadExtensionOptions: { allowFileAccess: true } };
@@ -315,17 +352,8 @@ if (isDev) {
 }
 
 function sendCrosshairToDcs(enabled) {
-  try {
-    const net = require("net");
-    const client = new net.Socket();
-    client.connect(42070, "127.0.0.1", function () {
-      client.write(
-        JSON.stringify({ type: "crosshair", payload: enabled ? "true" : "false" }) + "\n",
-      );
-      client.end();
-    });
-    client.on("error", () => {});
-  } catch {}
+  // same ordered queue as every other message to DCS
+  UDPSender.sendToDcs({ type: "crosshair", payload: enabled ? "true" : "false" }).catch(() => {});
 }
 
 function hideUnitImportAndReleaseFocus() {
@@ -437,7 +465,7 @@ function createOrShowUnitImport() {
     sendCrosshairToDcs(false);
   });
 
-  unitImportWindow.loadURL(buildAppUrl("unitImport"));
+  loadAppUrl(unitImportWindow, "unitImport");
 
   unitImportWindow.webContents.on("render-process-gone", (_e, details) => {
     console.error("[UnitImport] render-process-gone:", details);
@@ -486,6 +514,11 @@ if (!isTheOnlyInstance) {
     isQuitting = true;
   });
 
+  app.on("will-quit", () => {
+    if (speaker) speaker.destroy();
+    if (joystickListener) joystickListener.destroy();
+  });
+
   app.whenReady().then(() => {
     createWindow();
     ensureTray();
@@ -493,6 +526,8 @@ if (!isTheOnlyInstance) {
     udpListener = new UDPListener(mainWindow, () => unitImportWindow);
     fileHandler = new FileHandler(mainWindow);
     udpSender = new UDPSender();
+    joystickListener = new JoystickListener(() => mainWindow);
+    speaker = new Speaker();
     userPreferenceHandler = new UserPreferenceHandler(
       mainWindow,
       applyElectronPreferences,
@@ -571,12 +606,17 @@ if (!isTheOnlyInstance) {
 
     ipcMain.removeAllListeners("f10Start");
     ipcMain.on("f10Start", () => {
+      // never stack a second window on top of one that's already open
+      if (crosshairWindow && !crosshairWindow.isDestroyed()) return;
       crosshairWindow = new CrosshairWindow();
+      crosshairWindow.on("closed", () => {
+        crosshairWindow = null;
+      });
     });
 
     ipcMain.removeAllListeners("f10Stop");
     ipcMain.on("f10Stop", () => {
-      if (crosshairWindow) crosshairWindow.close();
+      if (crosshairWindow && !crosshairWindow.isDestroyed()) crosshairWindow.close();
       crosshairWindow = null;
     });
 
@@ -613,6 +653,7 @@ if (!isTheOnlyInstance) {
       const alwaysOnTop = preferences["alwaysOnTop"];
       const crosshairColor = preferences["crosshairColor"];
       setupKeybinds(mainWindow, preferences);
+      if (joystickListener) joystickListener.reload();
 
       if (alwaysOnTop === false) {
         mainWindow.setAlwaysOnTop(false, "screen-saver");

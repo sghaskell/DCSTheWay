@@ -18,8 +18,58 @@ local SkinUtils                         = require("SkinUtils")
 local upstreamLuaExportStart           = LuaExportStart
 local upstreamLuaExportAfterNextFrame  = LuaExportAfterNextFrame
 local upstreamLuaExportBeforeNextFrame = LuaExportBeforeNextFrame
+local upstreamLuaExportStop            = LuaExportStop
 
 local crosshair                        = nil
+local statusDialog                     = nil
+
+-- How often the camera/busy state is sent to the app (seconds). The app only
+-- reads it every 100 ms, so sending every frame (90+ Hz in VR) was wasted work
+-- on the render thread.
+local STATE_SEND_INTERVAL              = 0.05
+local lastStateSend                    = 0
+local lastSentBusy                     = nil
+
+-- In-DCS status text (visible in the VR headset, unlike the desktop app)
+local statusHideAt                     = nil -- socket.gettime() deadline, nil = sticky
+local statusText                       = ""
+local transferAnnounce                 = false
+local lastProgressPct                  = -1
+
+-- Partially received TCP clients, so a slow sender never blocks the frame
+local pendingClients                   = {}
+local PENDING_CLIENT_TIMEOUT           = 2.0
+
+local function setStatusText(text, durationMs)
+    if not statusDialog then return end
+    local ok, err = pcall(function()
+        text = tostring(text or "")
+        statusText = text
+        if text == "" then
+            statusDialog:setVisible(false)
+            statusHideAt = nil
+            return
+        end
+        statusDialog.StatusText:setText(text)
+        statusDialog:setVisible(true)
+        local ms = tonumber(durationMs) or 3000
+        if ms > 0 then
+            statusHideAt = socket.gettime() + ms / 1000
+        else
+            statusHideAt = nil
+        end
+    end)
+    if not ok then
+        log.write("THEWAY", log.ERROR, "setStatusText failed: " .. tostring(err))
+    end
+end
+
+local function updateStatusTimeout()
+    if statusHideAt and socket.gettime() >= statusHideAt then
+        statusHideAt = nil
+        setStatusText("", 0)
+    end
+end
 
 function LuaExportStart()
     if upstreamLuaExportStart ~= nil then
@@ -34,7 +84,8 @@ function LuaExportStart()
 
     tcpServer = socket.tcp()
     tcpServer:bind("127.0.0.1", 42070)
-    tcpServer:listen(1)
+    -- the app may open several connections at once (e.g. status + waypoints)
+    tcpServer:listen(16)
     tcpServer:settimeout(0)
 
     crosshair = DialogLoader.spawnDialogFromFile(
@@ -49,12 +100,47 @@ function LuaExportStart()
     local x = screenWidth / 2 - 5
     local y = screenHeigt / 2 - 5
     crosshair:setBounds(math.floor(x), math.floor(y), 10, 10)
+
+    local okStatus, errStatus = pcall(function()
+        statusDialog = DialogLoader.spawnDialogFromFile(
+            lfs.writedir() .. "Scripts\\TheWay\\TheWayStatus.dlg"
+        )
+        local w, h = 520, 90
+        statusDialog:setBounds(math.floor(screenWidth / 2 - w / 2), math.floor(screenHeigt * 0.18), w, h)
+        statusDialog:setVisible(false)
+    end)
+    if not okStatus then
+        statusDialog = nil
+        log.write("THEWAY", log.ERROR, "Status dialog unavailable: " .. tostring(errStatus))
+    end
 end
 
 function LuaExportStop()
-    if crosshair and crosshair.setVisible then
-        crosshair:setVisible(false)
+    if upstreamLuaExportStop ~= nil then
+        local successful, err = pcall(upstreamLuaExportStop)
+        if not successful then
+            log.write("THEWAY", log.ERROR, "Error in upstream LuaExportStop function" .. tostring(err))
+        end
     end
+
+    pcall(function()
+        if crosshair and crosshair.setVisible then
+            crosshair:setVisible(false)
+        end
+        if statusDialog and statusDialog.setVisible then
+            statusDialog:setVisible(false)
+        end
+    end)
+
+    -- Release the sockets so the next mission can bind port 42070 again
+    for _, pending in ipairs(pendingClients) do
+        pcall(function() pending.client:close() end)
+    end
+    pendingClients = {}
+    pcall(function() if tcpServer then tcpServer:close() end end)
+    pcall(function() if udpSpeaker then udpSpeaker:close() end end)
+    tcpServer = nil
+    udpSpeaker = nil
 end
 
 local keys                             = nil
@@ -88,11 +174,6 @@ end
 -- Generic cockpit-data helpers -----------------------------------------------
 local function get_list_indicator_value(indicator_id)
     local list_indicator = list_indication(indicator_id)
-	----------------------------------------------------------------------------------------------------------------------------
-	if li then
-        log.write("THEWAY_NS430", log.INFO, "Indicator "..indicator_id.." -> "..tostring(li))
-    end
-	------------------------------------------------------------------------------------------------------------------------------
     local display_data = {}
 
     if list_indicator == nil or list_indicator == "" then
@@ -143,6 +224,8 @@ local function send_tcp_response(client, response)
     end
 
     local ok, err = pcall(function()
+        -- clients are read non-blocking; allow a short, bounded wait to send
+        client:settimeout(0.5)
         client:send(encoded .. "\n")
         client:close()
     end)
@@ -436,6 +519,32 @@ local function send_intel_snapshot(units, origin)
     end
 end
 
+local function resetKeyQueue()
+    keys = nil
+    busy = false
+    isPressed = false
+    currCommandIndex = 1
+    lastProgressPct = -1
+end
+
+local function clickDevice(deviceId, code, value)
+    local device = GetDevice(deviceId)
+    if device == nil then
+        error("Cockpit device " .. tostring(deviceId) .. " not found (wrong aircraft or seat?)")
+    end
+    device:performClickableAction(code, value)
+end
+
+local function showTransferProgress()
+    if not transferAnnounce or not keys or #keys == 0 then return end
+    local pct = math.floor(((currCommandIndex - 1) / #keys) * 100)
+    -- only touch the widget when the number visibly changes
+    if pct ~= lastProgressPct and (pct - lastProgressPct >= 5 or pct < lastProgressPct) then
+        lastProgressPct = pct
+        setStatusText("TheWay: entering waypoints  " .. pct .. "%", 0)
+    end
+end
+
 function pressKeys()
     if busy then
         if isPressed then
@@ -444,48 +553,45 @@ function pressKeys()
             if currTime >= whenToDepress then
                 -- check if it even needs a depress
                 if lastNeedDepress then
-                    GetDevice(lastDevice):performClickableAction(lastCode, 0)
+                    clickDevice(lastDevice, lastCode, 0)
                 end
                 isPressed = false
                 currCommandIndex = currCommandIndex + 1
             end
         else
             --check if there are buttons left to press
-            if currCommandIndex <= #keys then
+            if keys and currCommandIndex <= #keys then
                 lastDevice = keys[currCommandIndex]["device"]
                 lastCode = keys[currCommandIndex]["code"]
 
-                local stringtoboolean_local = { ["true"] = true, ["false"] = false }
-                lastNeedDepress = stringtoboolean_local[keys[currCommandIndex]["addDepress"]]
+                lastNeedDepress = stringtoboolean[keys[currCommandIndex]["addDepress"]]
 
-                local delay = tonumber(keys[currCommandIndex]["delay"])
-                local activate = tonumber(keys[currCommandIndex]["activate"])
+                local delay = tonumber(keys[currCommandIndex]["delay"]) or 0
+                local activate = tonumber(keys[currCommandIndex]["activate"]) or 1
 
-                -- Push the button
-                GetDevice(lastDevice):performClickableAction(lastCode, activate)
-
-                -- Store the time when we will need to depress
+                -- Store the depress time before pushing, so a failed push cannot
+                -- leave isPressed without a deadline
                 whenToDepress = socket.gettime() + (delay / 1000)
                 isPressed = true
+
+                -- Push the button
+                clickDevice(lastDevice, lastCode, activate)
+                showTransferProgress()
             else
                 -- if there's nothing else to press, we are done
-                keys = nil
-                busy = false
-                currCommandIndex = 1
+                local announce = transferAnnounce
+                resetKeyQueue()
+                transferAnnounce = false
+                if announce then
+                    setStatusText("TheWay: transfer complete", 3000)
+                end
             end
         end
     end
 end
 
-function checkSocket()
-    local client, err = tcpServer:accept()
-    if client ~= nil then
-        client:settimeout(10)
-        local data, err2 = client:receive("*l")
-        if err2 then
-            log.write("THEWAY", log.ERROR, "Error at receiving: " .. tostring(err2))
-        end
-
+local function handleClientMessage(client, data)
+    do
         if data then
             local decodedData = safe_json_decode(data)
             if decodedData == nil then
@@ -597,9 +703,21 @@ function checkSocket()
                 send_intel_snapshot(units, origin)
 
             elseif decodedData["type"] == "waypoints" then
+                resetKeyQueue()
                 keys = decodedData["payload"]
-                busy = true
-                currCommandIndex = 1
+                busy = type(keys) == "table" and #keys > 0
+                if not busy then keys = nil end
+                transferAnnounce = busy and decodedData["announce"] == true
+
+            elseif decodedData["type"] == "status" then
+                local p = decodedData["payload"]
+                if type(p) == "table" then
+                    if p["onlyIf"] == nil or p["onlyIf"] == statusText then
+                        setStatusText(p["text"], p["ms"])
+                    end
+                else
+                    setStatusText(p, 3000)
+                end
 
             elseif decodedData["type"] == "crosshair" then
                 local shouldBeVisible = stringtoboolean[decodedData["payload"]]
@@ -610,15 +728,62 @@ function checkSocket()
                 end
 
             elseif decodedData["type"] == "abort" then
-                keys = nil
-                busy = false
-                currCommandIndex = 1
+                local wasBusy = busy
+                resetKeyQueue()
+                transferAnnounce = false
+                if wasBusy then
+                    setStatusText("TheWay: transfer aborted", 3000)
+                end
             end
         end
 
         pcall(function()
             client:close()
         end)
+    end
+end
+
+-- Accept new connections and read from them without ever blocking the frame.
+-- A message that has not fully arrived yet is kept and retried next frame.
+function checkSocket()
+    if not tcpServer then return end
+
+    -- accept every connection that is waiting, not just one per frame
+    for _ = 1, 16 do
+        local client = tcpServer:accept()
+        if client == nil then break end
+        client:settimeout(0)
+        table.insert(pendingClients, { client = client, buffer = "", started = socket.gettime() })
+    end
+
+    -- oldest first, so messages are handled in the order they were sent
+    local now = socket.gettime()
+    local i = 1
+    while i <= #pendingClients do
+        local pending = pendingClients[i]
+        local line, err, partial = pending.client:receive("*l")
+        if line then
+            table.remove(pendingClients, i)
+            handleClientMessage(pending.client, pending.buffer .. line)
+        else
+            if partial and partial ~= "" then
+                pending.buffer = pending.buffer .. partial
+            end
+            if err ~= "timeout" or now - pending.started > PENDING_CLIENT_TIMEOUT then
+                if err ~= "timeout" and err ~= "closed" then
+                    log.write("THEWAY", log.ERROR, "Error at receiving: " .. tostring(err))
+                end
+                table.remove(pendingClients, i)
+                -- a sender that closed without a newline still delivered its message
+                if pending.buffer ~= "" then
+                    handleClientMessage(pending.client, pending.buffer)
+                else
+                    pcall(function() pending.client:close() end)
+                end
+            else
+                i = i + 1 -- still waiting for the rest of this message
+            end
+        end
     end
 end
 
@@ -630,8 +795,22 @@ function LuaExportBeforeNextFrame()
         end
     end
 
-    pressKeys()
-    checkSocket()
+    -- Each step is protected separately: an error in one (e.g. a missing cockpit
+    -- device) must not stop the socket from being serviced every frame after.
+    local okKeys, errKeys = pcall(pressKeys)
+    if not okKeys then
+        log.write("THEWAY", log.ERROR, "pressKeys failed, transfer stopped: " .. tostring(errKeys))
+        resetKeyQueue()
+        transferAnnounce = false
+        setStatusText("TheWay: transfer failed - see dcs.log", 5000)
+    end
+
+    local okSocket, errSocket = pcall(checkSocket)
+    if not okSocket then
+        log.write("THEWAY", log.ERROR, "checkSocket failed: " .. tostring(errSocket))
+    end
+
+    pcall(updateStatusTimeout)
 end
 
 function LuaExportAfterNextFrame()
@@ -642,31 +821,43 @@ function LuaExportAfterNextFrame()
         end
     end
 
-    local camPos = LoGetCameraPosition()
-    local loX = camPos['p']['x']
-    local loZ = camPos['p']['z']
-    local elevation = LoGetAltitude(loX, loZ)
-    local coords = LoLoCoordinatesToGeoCoordinates(loX, loZ)
+    -- Throttle: send at most every STATE_SEND_INTERVAL, but always send at
+    -- once when busy changes so transfer code sees every busy edge.
+    local now = socket.gettime()
+    if busy == lastSentBusy and (now - lastStateSend) < STATE_SEND_INTERVAL then
+        return
+    end
 
-    local selfData = LoGetSelfData()
-    local model = selfData and selfData['Name'] or 'Spectator'
+    local ok, err = pcall(function()
+        if not udpSpeaker then return end
 
-    local message = {}
-    message["model"] = model
-    message["coords"] = {}
-    message["coords"]["lat"] = tostring(coords.latitude)
-    message["coords"]["long"] = tostring(coords.longitude)
-    message["elev"] = tostring(elevation)
-    message["busy"] = busy
+        local camPos = LoGetCameraPosition()
+        if not camPos or not camPos.p then return end
+        local loX = camPos['p']['x']
+        local loZ = camPos['p']['z']
+        local elevation = LoGetAltitude(loX, loZ)
+        local coords = LoLoCoordinatesToGeoCoordinates(loX, loZ)
+        if not coords then return end
 
-    local toSend = JSON:encode(message)
+        local selfData = LoGetSelfData()
+        local model = selfData and selfData['Name'] or 'Spectator'
 
-    if pcall(function()
-        socket.try(udpSpeaker:sendto(toSend, "127.0.0.1", 42069))
-    end) then
-        -- ok
-    else
-        log.write("THEWAY", log.ERROR, "Unable to send data")
+        local message = {}
+        message["model"] = model
+        message["coords"] = {}
+        message["coords"]["lat"] = tostring(coords.latitude)
+        message["coords"]["long"] = tostring(coords.longitude)
+        message["elev"] = tostring(elevation)
+        message["busy"] = busy
+
+        socket.try(udpSpeaker:sendto(JSON:encode(message), "127.0.0.1", 42069))
+        lastStateSend = now
+        lastSentBusy = busy
+    end)
+
+    if not ok then
+        log.write("THEWAY", log.ERROR, "Unable to send data: " .. tostring(err))
+        lastStateSend = now -- don't retry (and log) every frame
     end
 end
 

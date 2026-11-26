@@ -48,9 +48,9 @@ class userPreferenceHandler {
     }
 
     if (data.apply) {
-      this.applyElectronPreferences({
-        [data.key]: data.value,
-      });
+      // Apply the full stored preferences: applying only the changed key used
+      // to rebuild the hotkeys from that one key and drop every other binding.
+      this.applyElectronPreferences(this.store.get());
     }
   }
 

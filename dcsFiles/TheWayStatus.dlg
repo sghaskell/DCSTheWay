@@ -1,0 +1,76 @@
+dialog = {
+    ["type"] = "Window",
+    ["params"] = {
+        ["bounds"] = {
+            [1] = {
+                ["h"] = 90,
+                ["w"] = 520,
+                ["x"] = 0,
+                ["y"] = 0
+            }
+        },
+        ["draggable"] = false,
+        ["enabled"] = true,
+        ["hasCursor"] = false,
+        ["lockFlow"] = false,
+        ["modal"] = false,
+        ["offscreen"] = false,
+        ["resizable"] = false,
+        ["zOrder"] = 112,
+        ["text"] = ""
+    },
+    ["skin"] = {
+        ["params"] = {
+            ["headerHeight"] = 0,
+            ["name"] = "windowSkin"
+        },
+        ["states"] = {
+            ["released"] = {
+                [1] = {
+                    ["bkg"] = {
+                        ["center_center"] = "0x000000a0"
+                    }
+                }
+            }
+        }
+    },
+    ["children"] = {
+        ["StatusText"] = {
+            ["type"] = "Static",
+            ["params"] = {
+                ["bounds"] = {
+                    ["h"] = 90,
+                    ["w"] = 520,
+                    ["x"] = 0,
+                    ["y"] = 0
+                },
+                ["enabled"] = true,
+                ["text"] = "",
+                ["visible"] = true,
+                ["zindex"] = 0
+            },
+            ["skin"] = {
+                ["params"] = {
+                    ["name"] = "staticSkin"
+                },
+                ["states"] = {
+                    ["released"] = {
+                        [1] = {
+                            ["text"] = {
+                                ["color"] = "0x7cff7cff",
+                                ["font"] = "DejaVuLGCSansCondensed.ttf",
+                                ["fontSize"] = 20,
+                                ["horzAlign"] = {
+                                    ["type"] = "middle"
+                                },
+                                ["vertAlign"] = {
+                                    ["type"] = "middle"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

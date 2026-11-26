@@ -61,8 +61,19 @@ Video tutorial here:
 ### I cannot find the installer
 Make sure you have downloaded the program from the Releases section, and not the source code.  
 ### How do I use this for VR?
-You can use the DCS 2D Mirror that you see on your desktop to interact with TheWay and DCS.
-Or you can use the VR keybinds that can be adjusted in settings. 
+Bind TheWay's actions (crosshair, save, delete last/all, transfer, abort, and the
+Option 1-4 answers) in Settings → Keybindings. Each action takes a keyboard key and/or
+a button on your joystick, throttle or button box, and new bindings work immediately.
+
+While you fly, TheWay gives you feedback inside the headset:
+* a status line inside DCS (waypoint saved/deleted, transfer progress, transfer complete/aborted)
+* seat/option questions shown inside DCS as `[1] ... [2] ...`; answer them with your Option 1-4 bindings
+* short sound cues through your default audio device
+
+Both can be switched off in Settings → VR feedback. The status line needs
+`TheWayStatus.dlg` in your `Saved Games/DCS/Scripts/TheWay` folder next to `TheWay.lua`.
+
+You can still use the DCS 2D mirror on your desktop to interact with TheWay and DCS.
 ### I do not anything other than "Enter cockpit to start" error!
 THE WAY WILL NOT CONNECT TO DCS UNTIL YOU ARE IN THE COCKPIT OF YOUR CHOSEN MODULE.
 Make sure you have followed the installation instructions to the letter, and that every file is where it should be.

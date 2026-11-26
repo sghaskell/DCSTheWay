@@ -26,7 +26,8 @@ class CrosshairWindow extends BrowserWindow {
 
     this.setMenu(null);
     this.setIgnoreMouseEvents(true);
-    this.setAlwaysOnTop(true, "normal");
+    // Same level as the main overlay, so it also sits above borderless DCS
+    this.setAlwaysOnTop(true, "screen-saver");
     this.loadURL(
       isDev
         ? "http://localhost:3000/crosshair.html"

@@ -56,18 +56,46 @@ function sendTcpMessage(msg, expectResponse = false) {
   });
 }
 
+// Messages go to DCS one at a time, in the order they were sent. Firing several
+// connections at once (e.g. a status line and the waypoints) could get one
+// refused while TheWay.lua was busy with the other, silently dropping it.
+const RETRY_CODES = new Set(["ECONNREFUSED", "ECONNRESET"]);
+const RETRIES = 3;
+const RETRY_DELAY_MS = 100;
+
+let queue = Promise.resolve();
+
+const sendWithRetry = async (msg, expectResponse) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await sendTcpMessage(msg, expectResponse);
+    } catch (e) {
+      if (attempt >= RETRIES || !RETRY_CODES.has(e.code)) throw e;
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+    }
+  }
+};
+
+// Queue a message for DCS; resolves with the response (or null).
+const sendToDcs = (msg, expectResponse = false) => {
+  const result = queue.then(() => sendWithRetry(msg, expectResponse));
+  queue = result.catch(() => {}); // a failed message doesn't block the next
+  return result;
+};
+
 class TCPSender {
   constructor() {
     ipcMain.on("messageToDcs", (_event, msg) => {
-      sendTcpMessage(msg, false).catch((e) => {
-        console.log(e);
+      sendToDcs(msg, false).catch((e) => {
+        console.log(`[TheWay] message to DCS (${msg?.type || msg?.cmd}) failed: ${e.code || e.message}`);
       });
     });
 
     ipcMain.handle("messageToDcsRequest", async (_event, msg) => {
-      return await sendTcpMessage(msg, true);
+      return await sendToDcs(msg, true);
     });
   }
 }
 
 module.exports = TCPSender;
+module.exports.sendToDcs = sendToDcs;

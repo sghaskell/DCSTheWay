@@ -1,5 +1,33 @@
 const { uIOhook, UiohookKey } = require("uiohook-napi");
 
+// Every action that can be bound to a keyboard key or a joystick button.
+// prefKey: where the keyboard binding is stored. joyKey: child key under
+// "joyBinds" where the joystick binding is stored.
+const ACTIONS = [
+  { name: "crosshair", prefKey: "crosshairKeybind", channel: ["toggleCrosshair"] },
+  { name: "save", prefKey: "saveKeybind", channel: ["saveWaypoint"] },
+  { name: "deleteLast", prefKey: "deleteLastKeybind", channel: ["deleteLastWaypoint"] },
+  { name: "deleteAll", prefKey: "deleteAllKeybind", channel: ["deleteWaypoints"] },
+  { name: "transfer", prefKey: "transferKeybind", channel: ["transferWaypoints"] },
+  { name: "abort", prefKey: "abortKeybind", channel: ["abortTransfer"] },
+  { name: "op1", prefKey: "optionDialogKeybinds.op1", channel: ["optionDialogSelect", "op1"] },
+  { name: "op2", prefKey: "optionDialogKeybinds.op2", channel: ["optionDialogSelect", "op2"] },
+  { name: "op3", prefKey: "optionDialogKeybinds.op3", channel: ["optionDialogSelect", "op3"] },
+  { name: "op4", prefKey: "optionDialogKeybinds.op4", channel: ["optionDialogSelect", "op4"] },
+];
+
+const runAction = (mainWindow, actionName) => {
+  const action = ACTIONS.find((a) => a.name === actionName);
+  if (!action || !mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(...action.channel);
+};
+
+const getPref = (preferences, path) => {
+  if (!preferences) return undefined;
+  if (Object.prototype.hasOwnProperty.call(preferences, path)) return preferences[path];
+  return path.split(".").reduce((acc, part) => (acc ? acc[part] : undefined), preferences);
+};
+
 const parseKeybind = (keybindValue) => {
   if (!keybindValue || keybindValue === "None") return null;
 
@@ -16,78 +44,23 @@ const parseKeybind = (keybindValue) => {
 };
 
 const setupKeybinds = (mainWindow, preferences) => {
-  // Build a list of actions + their parsed keybind matchers
   const bindings = [];
 
-  const addBinding = (name, keybindValue, action) => {
-    const parsed = parseKeybind(keybindValue);
-    if (!parsed) return;
-    bindings.push({ name, ...parsed, action });
-  };
-
-  addBinding(
-    "crosshairKeybind",
-    preferences["crosshairKeybind"],
-    () => mainWindow.webContents.send("toggleCrosshair"),
-  );
-
-  addBinding(
-    "saveKeybind",
-    preferences["saveKeybind"],
-    () => mainWindow.webContents.send("saveWaypoint"),
-  );
-
-  addBinding(
-    "deleteLastKeybind",
-    preferences["deleteLastKeybind"],
-    () => mainWindow.webContents.send("deleteLastWaypoint"),
-  );
-
-  addBinding(
-    "deleteAllKeybind",
-    preferences["deleteAllKeybind"],
-    () => mainWindow.webContents.send("deleteWaypoints"),
-  );
-
-  addBinding(
-    "transferKeybind",
-    preferences["transferKeybind"],
-    () => mainWindow.webContents.send("transferWaypoints"),
-  );
-
-  // Option dialog keybinds (op1-op4)
-  addBinding(
-    "optionOp1Keybind",
-    preferences?.optionDialogKeybinds?.op1,
-    () => mainWindow.webContents.send("optionDialogSelect", "op1"),
-  );
-
-  addBinding(
-    "optionOp2Keybind",
-    preferences?.optionDialogKeybinds?.op2,
-    () => mainWindow.webContents.send("optionDialogSelect", "op2"),
-  );
-
-  addBinding(
-    "optionOp3Keybind",
-    preferences?.optionDialogKeybinds?.op3,
-    () => mainWindow.webContents.send("optionDialogSelect", "op3"),
-  );
-
-  addBinding(
-    "optionOp4Keybind",
-    preferences?.optionDialogKeybinds?.op4,
-    () => mainWindow.webContents.send("optionDialogSelect", "op4"),
-  );
+  for (const action of ACTIONS) {
+    const parsed = parseKeybind(getPref(preferences, action.prefKey));
+    if (parsed) bindings.push({ name: action.name, ...parsed });
+  }
 
   // Remove any previous listeners (important if setupKeybinds is called more than once)
   uIOhook.removeAllListeners("keydown");
   uIOhook.removeAllListeners("keyup");
 
-  let keydown = false;
+  // The key that triggered the last action. Auto-repeat of that key is ignored
+  // until it is released; releasing some other key no longer re-arms it.
+  let heldKeycode = null;
 
   uIOhook.on("keydown", (event) => {
-    if (keydown) return;
+    if (heldKeycode === event.keycode) return;
 
     for (const b of bindings) {
       if (
@@ -96,15 +69,15 @@ const setupKeybinds = (mainWindow, preferences) => {
         event.altKey === b.isAlt &&
         event.keycode === b.keycode
       ) {
-        keydown = true;
-        b.action();
+        heldKeycode = event.keycode;
+        runAction(mainWindow, b.name);
         break;
       }
     }
   });
 
-  uIOhook.on("keyup", () => {
-    keydown = false;
+  uIOhook.on("keyup", (event) => {
+    if (event.keycode === heldKeycode) heldKeycode = null;
   });
 
   // Restart hook cleanly
@@ -115,3 +88,5 @@ const setupKeybinds = (mainWindow, preferences) => {
 };
 
 module.exports = setupKeybinds;
+module.exports.ACTIONS = ACTIONS;
+module.exports.runAction = runAction;

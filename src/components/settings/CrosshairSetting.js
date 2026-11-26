@@ -8,10 +8,9 @@ import {
 } from "@mui/material";
 import { MuiColorInput } from "mui-color-input";
 import _ from "lodash";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSelector } from "react-redux";
 import "./SettingsDialog.css";
-const { ipcRenderer } = window.require("electron");
 
 const CrosshairSetting = ({ settingChangeHandler }) => {
   const userPreferences = useSelector((state) => state.ui.userPreferences);
@@ -23,6 +22,15 @@ const CrosshairSetting = ({ settingChangeHandler }) => {
     const color = userPreferenceColor;
     if (color) setCrosshairColor(color);
   }, [userPreferenceColor]);
+
+  // Save (and recolor the open crosshair) at most every 150 ms while dragging.
+  // Created once: a debounce rebuilt on every render never actually debounces.
+  const saveColor = useMemo(
+    () => _.debounce((color) => settingChangeHandler("crosshairColor", color), 150),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  useEffect(() => () => saveColor.flush(), [saveColor]);
 
   return (
     <Stack direction={"column"}>
@@ -54,10 +62,10 @@ const CrosshairSetting = ({ settingChangeHandler }) => {
             <Box sx={{ width: "100%" }}>
               <MuiColorInput
                 value={crosshairColor}
-                onChange={_.debounce((color) => {
-                  settingChangeHandler("crosshairColor", color);
-                  ipcRenderer.send("color", color);
-                }, 150)}
+                onChange={(color) => {
+                  setCrosshairColor(color); // the picker follows the mouse at once
+                  saveColor(color);
+                }}
                 format="hex"
                 isAlphaHidden
               />
